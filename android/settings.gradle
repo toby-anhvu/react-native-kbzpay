@@ -1,0 +1,4 @@
+rootProject.name = 'react-native-kbzpay'
+include ':kbz-pay-sdk'
+project(':kbz-pay-sdk').projectDir = new File(rootProject.projectDir, 'kbz-pay-sdk')
+

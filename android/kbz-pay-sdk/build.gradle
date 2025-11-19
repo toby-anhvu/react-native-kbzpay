@@ -1,0 +1,30 @@
+apply plugin: 'com.android.library'
+
+android {
+    namespace "com.kbzbank.payment.sdk"
+    compileSdkVersion 34
+    
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 34
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+    flatDir {
+        dirs '.'
+    }
+}
+
+dependencies {
+    // Support UAT and Production environments
+    // Set useUAT=true in gradle.properties to use UAT SDK
+    def sdkFileName = rootProject.hasProperty('useUAT') && rootProject.getProperty('useUAT') == 'true' 
+        ? 'kbzsdk_1.1.0_uat.aar'
+        : 'kbzsdk_1.1.0.aar'
+    
+    api files(sdkFileName)
+}
+

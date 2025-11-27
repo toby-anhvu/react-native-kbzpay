@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/toby-anhvu/react-native-kbzpay.git", :tag => "#{s.version}" }
 
-  s.source_files = "ios/**/*.{h,m,mm,swift,cpp}"
+  s.source_files = "ios/*.{h,m,mm,swift}"
   
   # Swift support
   s.swift_version = '5.0'

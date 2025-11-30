@@ -1,6 +1,8 @@
 import Foundation
 import React
+#if !targetEnvironment(simulator)
 import KBZPayAPPPay
+#endif
 
 @objc(Kbzpay)
 class Kbzpay: NSObject {
@@ -109,6 +111,7 @@ class Kbzpay: NSObject {
                 }
                 
                 // Create PaymentViewController instance
+                #if !targetEnvironment(simulator)
                 let paymentVC = PaymentViewController()
                 
                 // Start payment with KBZPay SDK
@@ -120,6 +123,12 @@ class Kbzpay: NSObject {
                 )
                 
                 print("✅ Payment request sent to KBZPay SDK")
+                #else
+                // KBZPay is not supported on iOS Simulator
+                reject("SIMULATOR_NOT_SUPPORTED", "KBZPay is not supported on iOS Simulator. Please use a real device.", nil)
+                self.clearPromises()
+                return
+                #endif
                 
             } catch {
                 print("❌ Payment error: \(error.localizedDescription)")

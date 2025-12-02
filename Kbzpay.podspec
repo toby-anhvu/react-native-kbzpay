@@ -18,23 +18,26 @@ Pod::Spec.new do |s|
   # Swift support
   s.swift_version = '5.0'
   s.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES'
+    'DEFINES_MODULE' => 'YES',
+    # Exclude arm64 for simulator to avoid architecture conflicts
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64'
   }
 
   # KBZPay Framework support
   s.preserve_paths = 'ios/Frameworks/KBZPayAPPPay.framework/**/*'
   
-  # Conditionally link framework only for device builds (not simulator)
-  # The framework only supports device architectures, not simulator
+  # Include framework but link conditionally
+  # Framework is always available (for archive builds) but only linked for device
+  s.vendored_frameworks = 'ios/Frameworks/KBZPayAPPPay.framework'
+  
   s.xcconfig = {
     'ENABLE_BITCODE' => 'NO',
-    # Framework linking is conditional - only for device builds
+    'FRAMEWORK_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/../../../ios/Frameworks"',
+    # Strong link for device builds
     'OTHER_LDFLAGS[sdk=iphoneos*]' => '$(inherited) -framework "KBZPayAPPPay"',
-    'FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]' => '$(inherited) "$(PODS_ROOT)/../../../ios/Frameworks"'
+    # Weak link for simulator (allows build but framework won't be used)
+    'OTHER_LDFLAGS[sdk=iphonesimulator*]' => '$(inherited) -weak_framework "KBZPayAPPPay"'
   }
-  
-  # Note: vendored_frameworks is removed to allow conditional linking
-  # The framework will only be linked for device builds via xcconfig
 
   install_modules_dependencies(s)
 end

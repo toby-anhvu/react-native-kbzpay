@@ -1,15 +1,16 @@
 package com.kbzpay
 
-import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.util.Log
 import com.facebook.react.bridge.*
 import com.facebook.react.module.annotations.ReactModule
 import com.kbzbank.payment.KBZPay
 
 @ReactModule(name = KbzpayModule.NAME)
-class KbzpayModule(reactContext: ReactApplicationContext) :
-        NativeKbzpaySpec(reactContext), ActivityEventListener {
+class KbzpayModule(reactContext: ReactApplicationContext) : NativeKbzpaySpec(reactContext) {
 
   companion object {
     const val NAME = "Kbzpay"
@@ -17,74 +18,146 @@ class KbzpayModule(reactContext: ReactApplicationContext) :
     private const val E_ACTIVITY_DOES_NOT_EXIST = "ACTIVITY_DOES_NOT_EXIST"
     private const val E_PAYMENT_FAILED = "PAYMENT_FAILED"
     private const val E_PAYMENT_CANCELLED = "PAYMENT_CANCELLED"
-
-    // KBZPay app package names
     private const val KBZPAY_PACKAGE_PRODUCTION = "com.kbzbank.kpaycustomer"
     private const val KBZPAY_PACKAGE_UAT = "com.kbzbank.kpaycustomer.uat"
-
-    // Request codes
-    private const val REQUEST_CODE_KBZPAY = 9001
   }
 
   private var paymentPromise: Promise? = null
+  private var paymentResultReceiver: BroadcastReceiver? = null
 
   init {
-    reactContext.addActivityEventListener(this)
+    registerPaymentResultReceiver()
+  }
+
+  override fun onCatalystInstanceDestroy() {
+    super.onCatalystInstanceDestroy()
+    unregisterPaymentResultReceiver()
+  }
+
+  private fun registerPaymentResultReceiver() {
+    if (paymentResultReceiver != null) return
+
+    paymentResultReceiver =
+            object : BroadcastReceiver() {
+              override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == KbzpayCallbackActivity.ACTION_PAYMENT_RESULT) {
+                  handlePaymentResult(intent)
+                }
+              }
+            }
+
+    val filter = IntentFilter(KbzpayCallbackActivity.ACTION_PAYMENT_RESULT)
+    try {
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        reactApplicationContext.registerReceiver(
+                paymentResultReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+        )
+      } else {
+        reactApplicationContext.registerReceiver(paymentResultReceiver, filter)
+      }
+      Log.d(TAG, "✅ Payment receiver registered")
+    } catch (e: Exception) {
+      Log.e(TAG, "❌ Failed to register receiver: ${e.message}", e)
+    }
+  }
+
+  private fun unregisterPaymentResultReceiver() {
+    paymentResultReceiver?.let { receiver ->
+      try {
+        reactApplicationContext.unregisterReceiver(receiver)
+        Log.d(TAG, "✅ Payment receiver unregistered")
+      } catch (e: Exception) {
+        Log.e(TAG, "Error unregistering: ${e.message}")
+      }
+      paymentResultReceiver = null
+    }
+  }
+
+  private fun handlePaymentResult(intent: Intent) {
+    try {
+      val resultCode = intent.getIntExtra(KBZPay.EXTRA_RESULT, -1)
+      val orderId = intent.getStringExtra(KBZPay.EXTRA_ORDER_ID) ?: ""
+      val failMsg = intent.getStringExtra(KBZPay.EXTRA_FAIL_MSG) ?: ""
+
+      Log.d(TAG, "📊 Result received: code=$resultCode, order=$orderId")
+
+      val result =
+              Arguments.createMap().apply {
+                putInt("resultCode", resultCode)
+                putString("orderId", orderId)
+                putString("failMsg", failMsg)
+              }
+
+      paymentPromise?.let { p ->
+        when (resultCode) {
+          KBZPay.COMPLETED -> {
+            Log.d(TAG, "✅ Payment success")
+            p.resolve(result)
+          }
+          KBZPay.FAIL -> {
+            Log.e(TAG, "❌ Payment failed: $failMsg")
+            p.reject(E_PAYMENT_FAILED, failMsg, result)
+          }
+          KBZPay.CANCEL -> {
+            Log.w(TAG, "⚠️ Payment cancelled")
+            p.reject(E_PAYMENT_CANCELLED, "Cancelled", result)
+          }
+          else -> {
+            Log.w(TAG, "⚠️ Unknown: $resultCode")
+            p.reject(E_PAYMENT_CANCELLED, "Unknown", result)
+          }
+        }
+        paymentPromise = null
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "❌ Error: ${e.message}", e)
+      paymentPromise?.reject("RESULT_ERROR", e.message, e)
+      paymentPromise = null
+    }
   }
 
   @ReactMethod
   override fun initialize(appId: String, merchCode: String, promise: Promise) {
     try {
-      val activity = reactApplicationContext.currentActivity
-
-      if (activity == null) {
-        promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "Activity doesn't exist")
+      if (reactApplicationContext.currentActivity == null) {
+        promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "No activity")
         return
       }
-      Log.d(TAG, "✅ KBZPay initialized (no-op)")
+      Log.d(TAG, "✅ Initialized")
       promise.resolve(true)
     } catch (e: Exception) {
-      Log.e(TAG, "❌ Init error: ${e.message}", e)
       promise.reject("INIT_ERROR", e.message, e)
     }
   }
 
   @ReactMethod
   override fun isKBZPayInstalled(promise: Promise) {
-    Log.d(TAG, "🔍 Checking KBZPay installation...")
     try {
       val activity = reactApplicationContext.currentActivity
-
       if (activity == null) {
-        Log.e(TAG, "❌ Activity is null")
-        promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "Activity doesn't exist")
+        promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "No activity")
         return
       }
 
-      val packageManager = activity.packageManager
-      var isInstalled = false
-
-      // Try Production package first
-      try {
-        packageManager.getPackageInfo(KBZPAY_PACKAGE_PRODUCTION, 0)
-        isInstalled = true
-        Log.d(TAG, "✅ Found Production KBZPay app")
-      } catch (e: Exception) {
-        // Try UAT package
-        try {
-          packageManager.getPackageInfo(KBZPAY_PACKAGE_UAT, 0)
-          isInstalled = true
-          Log.d(TAG, "✅ Found UAT KBZPay app")
-        } catch (e2: Exception) {
-          isInstalled = false
-          Log.d(TAG, "❌ KBZPay app not found")
-        }
-      }
+      val pm = activity.packageManager
+      val isInstalled =
+              try {
+                pm.getPackageInfo(KBZPAY_PACKAGE_PRODUCTION, 0)
+                true
+              } catch (e: Exception) {
+                try {
+                  pm.getPackageInfo(KBZPAY_PACKAGE_UAT, 0)
+                  true
+                } catch (e2: Exception) {
+                  false
+                }
+              }
 
       promise.resolve(isInstalled)
     } catch (e: Exception) {
-      Log.e(TAG, "❌ Check install error: ${e.message}", e)
-      promise.reject("CHECK_INSTALL_ERROR", e.message, e)
+      promise.reject("CHECK_ERROR", e.message, e)
     }
   }
 
@@ -99,89 +172,21 @@ class KbzpayModule(reactContext: ReactApplicationContext) :
           promise: Promise
   ) {
     val activity = reactApplicationContext.currentActivity
-
     if (activity == null) {
-      Log.e(TAG, "❌ Activity is null")
-      promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "Activity doesn't exist")
+      promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "No activity")
       return
     }
 
-    // Store promise for callback
     paymentPromise = promise
 
     try {
+      Log.d(TAG, "🚀 Starting payment")
       KBZPay.startPay(activity, orderInfo, sign, "SHA256")
-      Log.d(TAG, "🚀 Payment request sent to KBZPay SDK")
+      Log.d(TAG, "✅ Request sent, waiting for callback...")
     } catch (e: Exception) {
       Log.e(TAG, "❌ Payment error: ${e.message}", e)
-      paymentPromise?.let { p ->
-        p.reject("PAYMENT_ERROR", e.message, e)
-        paymentPromise = null
-      }
+      paymentPromise?.reject("PAYMENT_ERROR", e.message, e)
+      paymentPromise = null
     }
-  }
-
-  override fun onActivityResult(
-          activity: Activity,
-          requestCode: Int,
-          resultCode: Int,
-          data: Intent?
-  ) {
-    Log.d(TAG, "onActivityResult: requestCode=$requestCode, resultCode=$resultCode")
-
-    if (data == null) {
-      Log.d(TAG, "Intent data is null")
-      return
-    }
-
-    try {
-      val resultCodeFromIntent = data.getIntExtra(KBZPay.EXTRA_RESULT, -1)
-      val orderId = data.getStringExtra(KBZPay.EXTRA_ORDER_ID) ?: ""
-      val failMsg = data.getStringExtra(KBZPay.EXTRA_FAIL_MSG) ?: ""
-
-      Log.d(TAG, "📊 Payment callback received")
-      Log.d(TAG, "Result Code: $resultCodeFromIntent")
-      Log.d(TAG, "Order ID: $orderId")
-      Log.d(TAG, "Fail Message: $failMsg")
-
-      val result =
-              Arguments.createMap().apply {
-                putInt("resultCode", resultCodeFromIntent)
-                putString("orderId", orderId)
-                putString("failMsg", failMsg)
-              }
-
-      paymentPromise?.let { p ->
-        when (resultCodeFromIntent) {
-          KBZPay.COMPLETED -> {
-            Log.d(TAG, "✅ Payment success")
-            p.resolve(result)
-          }
-          KBZPay.FAIL -> {
-            Log.e(TAG, "❌ Payment failed: $failMsg")
-            p.reject(E_PAYMENT_FAILED, failMsg, result)
-          }
-          KBZPay.CANCEL -> {
-            Log.w(TAG, "⚠️ Payment cancelled")
-            p.reject(E_PAYMENT_CANCELLED, "Payment cancelled", result)
-          }
-          else -> {
-            Log.w(TAG, "⚠️ Unknown result: $resultCodeFromIntent")
-            p.reject(E_PAYMENT_CANCELLED, "Unknown result", result)
-          }
-        }
-        paymentPromise = null
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "❌ Error processing result: ${e.message}", e)
-      paymentPromise?.let { p ->
-        p.reject("RESULT_ERROR", e.message, e)
-        paymentPromise = null
-      }
-    }
-  }
-
-  override fun onNewIntent(intent: Intent) {
-    Log.d(TAG, "onNewIntent: $intent")
   }
 }

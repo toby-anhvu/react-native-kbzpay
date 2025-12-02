@@ -22,5 +22,12 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      
+      <activity
+        android:name="com.kbzpay.KbzpayCallbackActivity"
+        android:theme="@android:style/Theme.NoDisplay"
+        android:exported="true"
+        android:launchMode="singleInstance" />
     </application>
 </manifest>

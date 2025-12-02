@@ -2,6 +2,10 @@
 	<uses-permission android:name="android.permission.INTERNET" />
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 	<application>
-		<activity android:name="com.kbzbank.payment.sdk.callback.CallbackResultActivity" android:theme="@android:style/Theme.NoDisplay" android:exported="true" android:launchMode="singleTop" />
+		<activity 
+			android:name="com.kbzpay.KbzpayCallbackActivity"
+			android:theme="@android:style/Theme.NoDisplay"
+			android:exported="true"
+			android:launchMode="singleInstance" />
 	</application>
 </manifest>
